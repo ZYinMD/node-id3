@@ -163,22 +163,50 @@ module.exports.read = function(filebuffer, options, fn) {
     }
     if(!fn || typeof fn !== 'function') {
         if(typeof filebuffer === "string" || filebuffer instanceof String) {
-            filebuffer = fs.readFileSync(filebuffer)
+            return this.getFromFileByStream(filebuffer, options)
         }
         return this.getTagsFromBuffer(filebuffer, options)
     } else {
         if(typeof filebuffer === "string" || filebuffer instanceof String) {
-            fs.readFile(filebuffer, function(err, data) {
-                if(err) {
-                    fn(err, null)
-                } else {
-                    fn(null, this.getTagsFromBuffer(data, options))
+            setTimeout(() => {
+                try {
+                    const tags = this.getFromFileByStream(filebuffer, options)
+                    fn(null, tags)
+                } catch(e) {
+                    fn(e, null)
                 }
-            }.bind(this))
+            }, 0)
         } else {
             fn(null, this.getTagsFromBuffer(filebuffer, options))
         }
     }
+}
+
+module.exports.getFromFileByStream = function(filepath, options) {
+    const fd = fs.openSync(filepath, 'r')
+    const chunkSize = 4096
+    const chunk = Buffer.alloc(chunkSize)
+    let bytesRead = 0
+    let pos = 0
+    while(bytesRead = fs.readSync(fd, chunk, 0, chunkSize, pos)) {
+        pos += bytesRead - 3
+        let id3Index = chunk.indexOf('ID3');
+        if(id3Index === -1) continue
+        if(chunkSize - id3Index < 10) {
+            pos -= 10
+        } else {
+            const header = Buffer.alloc(10)
+            chunk.copy(header, 0, id3Index, id3Index + 10)
+            if(ID3Util.isValidID3Header(header)) {
+                const id3Buf = Buffer.alloc(ID3Util.decodeSize(header.slice(6, 10)) + 11)
+                fs.readSync(fd, id3Buf, 0, id3Buf.length, id3Index)
+                fs.closeSync(fd)
+                return this.getTagsFromBuffer(id3Buf, options)
+            }
+        }
+    }
+    fs.closeSync(fd)
+    return this.getTagsFromBuffer(Buffer.alloc(0), options)
 }
 
 /**
